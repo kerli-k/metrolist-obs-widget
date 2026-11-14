@@ -1,0 +1,9 @@
+# Generated at runtime by the bridge
+current_song.json
+current_song.js
+current_song.json.tmp
+current_song.js.tmp
+current_cover.*
+
+__pycache__/
+*.pyc
