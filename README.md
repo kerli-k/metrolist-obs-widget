@@ -4,12 +4,16 @@ A full-bleed "now playing" bar for the [Metrolist](https://github.com/MetrolistG
 
 Metrolist desktop already publishes playback through the OS (Windows SMTC / Linux MPRIS). The browser cannot read those sessions, so this package includes a small loopback bridge that polls the session and feeds the HTML.
 
+Tested on Windows 10/11 and on CachyOS/Arch Linux (Metrolist 14.x, KDE Plasma/Wayland).
+
 ## What's in the box
 
 | File | Purpose |
 | --- | --- |
 | `index.html` | The overlay. All HTML/CSS/JS in one file, plus URL parameters. |
 | `start_bridge.bat` | Double-click launcher for the Windows bridge. |
+| `start_bridge.sh` | One-command launcher for the Linux bridge. |
+| `install_linux_autostart.sh` | Optional systemd user service so the Linux bridge starts at login. |
 | `bridge_metrolist.ps1` | Windows bridge: SMTC → JSON on `127.0.0.1:8974`, plus fallback files. |
 | `bridge_metrolist.py` | Linux bridge: MPRIS through `playerctl`, same API and files. |
 | `MetrolistArtwork.dll` | Tiny helper that extracts the SMTC artwork stream (source below). |
@@ -25,6 +29,55 @@ Metrolist desktop already publishes playback through the OS (Windows SMTC / Linu
 The overlay hides while paused by default. Add `?features=not-hide-on-pause` to the URL to keep the paused track visible.
 
 > The batch file uses Windows PowerShell 5.1 (`powershell.exe`), not PowerShell 7. The SMTC/WinRT APIs and the artwork helper are built for 5.1.
+
+## Quick start (Linux)
+
+Metrolist for Linux publishes a standard MPRIS session (`org.mpris.MediaPlayer2.metrolist`). The bundled Python bridge reads it with `playerctl` and serves the same endpoints as the Windows bridge.
+
+1. Install the one dependency:
+
+   | Distro | Command |
+   | --- | --- |
+   | Arch / CachyOS / Manjaro | `sudo pacman -S playerctl` |
+   | Debian / Ubuntu / Mint | `sudo apt install playerctl` |
+   | Fedora | `sudo dnf install playerctl` |
+   | openSUSE | `sudo zypper install playerctl` |
+
+2. Start **Metrolist for desktop** and play something. Check that the session is visible:
+
+   ```bash
+   playerctl -l          # should list: metrolist
+   playerctl -p metrolist metadata
+   ```
+
+3. From this folder, start the bridge:
+
+   ```bash
+   ./start_bridge.sh
+   ```
+
+   If the file is not executable after unzipping: `chmod +x start_bridge.sh install_linux_autostart.sh`.
+
+4. Verify:
+
+   ```bash
+   curl http://127.0.0.1:8974/nowplaying
+   ```
+
+   Or open <http://127.0.0.1:8974/> in a browser. Leave the terminal open.
+
+5. In OBS: **Sources → + → Browser**, set **URL** to `http://127.0.0.1:8974/`, **Width 640**, **Height 160**. Leave **Shutdown source when not visible** unchecked.
+
+> **Flatpak OBS:** use the `http://127.0.0.1:8974/` URL, not a `file://` path. The Flatpak sandbox may not be allowed to read your home folder, but loopback HTTP works. The same advice applies if local-file artwork is blocked.
+
+To start the bridge automatically at login, run the included installer once:
+
+```bash
+./install_linux_autostart.sh
+journalctl --user -u metrolist-obs-bridge -f
+```
+
+It creates `~/.config/systemd/user/metrolist-obs-bridge.service`, enables it, and starts it. Stop it with `systemctl --user disable --now metrolist-obs-bridge.service`.
 
 ## OBS settings
 
@@ -114,18 +167,34 @@ Run:
 start_bridge.bat -NoServer
 ```
 
+On Linux:
+
+```bash
+./start_bridge.sh --no-server
+```
+
 The bridge still polls and writes `current_song.json`, `current_song.js`, and the current cover into this folder. The widget reads `current_song.js` with a `<script>` tag because Chromium blocks `fetch()` of local JSON from a `file://` page. Keep `index.html`, the bridge files, and the generated files in the same folder.
 
 Any other tool can drive the widget by writing the same `current_song.js` format.
 
-## Linux (MPRIS)
+## Linux notes (MPRIS)
 
-```bash
-sudo apt install playerctl
-python3 bridge_metrolist.py
-```
+- The bridge auto-detects the player whose MPRIS name contains `metrolist`. Metrolist 14.x uses `org.mpris.MediaPlayer2.metrolist`, which `playerctl` shows as `metrolist`.
+- You can run the Python script directly if you prefer: `python3 bridge_metrolist.py`, or with a custom port: `python3 bridge_metrolist.py --port 9000`.
+- File-only mode (no HTTP server): `python3 bridge_metrolist.py --no-server`.
+- Album art comes from the `mpris:artUrl` metadata. Metrolist normally publishes a YouTube Music HTTPS URL; the bridge downloads it once per track and serves it locally. If the network blocks it, the widget shows the music-note placeholder.
+- The AppImage and the `metrolist-desktop-bin` AUR package publish MPRIS; no special Metrolist setting is needed. Metrolist must be running as your desktop user (not as root).
+- If `playerctl -l` is empty while Metrolist is playing, check D-Bus directly:
 
-The script finds the MPRIS player whose name contains `metrolist`, serves the same endpoints, and writes the same fallback files. Artwork is read from `file://` paths or downloaded from its HTTP(S) URL.
+  ```bash
+  busctl --user list | grep -i mpris
+  busctl --user introspect org.mpris.MediaPlayer2.metrolist /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2.Player
+  ```
+
+  If the name is missing, the app did not register its media session (restart Metrolist and play a track).
+
+- Multiple players are fine: only the `metrolist` session is used.
+- `playerctl` reads the session of the same user. If you launch Metrolist through a Flatpak or a different user/session, MPRIS may not be visible.
 
 ## Customizing
 
@@ -149,7 +218,7 @@ Design tokens are at the top of `index.html`:
 
 Fonts use a system UI stack. The original reference uses YouTube Sans (not bundled here); if you have a licensed copy, add an `@font-face` and put it first in the `body` font stack.
 
-To change the bridge port, use `?port=9000` on the widget and start the bridge with `-Port 9000` (PowerShell) or `--port 9000` (Python).
+To change the bridge port, use `?port=9000` on the widget and start the bridge with `-Port 9000` (PowerShell) or `--port 9000` (Python, for example `./start_bridge.sh --port 9000`).
 
 ## Troubleshooting
 
@@ -177,6 +246,31 @@ To change the bridge port, use `?port=9000` on the widget and start the bridge w
 
 **`start_bridge.bat` closes immediately.**
 Run it from a terminal to see the error. Usual causes: missing `MetrolistArtwork.dll`, an old PowerShell, or an execution policy. The batch file already uses `-ExecutionPolicy Bypass`.
+
+**`start_bridge.sh: Permission denied` (Linux).**
+The executable bit was lost when the files were copied or unzipped:
+
+```bash
+chmod +x start_bridge.sh install_linux_autostart.sh
+```
+
+**Linux: `playerctl -l` shows no players.**
+Start Metrolist desktop, play a track, and run `playerctl -l` again. If it is still empty, check `busctl --user list | grep -i mpris`. On AppImage builds, make sure you launched the app from the same graphical session, not through `sudo` or a different user. The bridge keeps polling, so it will pick the player up when it appears.
+
+**Linux: the bridge is running but the overlay stays hidden.**
+That is expected while paused. Use `?features=not-hide-on-pause` in the browser-source URL to keep the paused track visible. Also confirm `curl http://127.0.0.1:8974/nowplaying` returns a recent `updated_at`.
+
+**Flatpak OBS shows a blank page.**
+Use `http://127.0.0.1:8974/` as the browser-source URL instead of a `file://` path, and keep the bridge running. The Flatpak sandbox can reach loopback HTTP but may not have permission to read arbitrary files in your home directory.
+
+**Linux autostart service is not running.**
+
+```bash
+systemctl --user status metrolist-obs-bridge
+journalctl --user -u metrolist-obs-bridge -n 50
+```
+
+Re-run `./install_linux_autostart.sh` after moving the folder; the unit stores the folder's absolute path.
 
 **OBS shows a blank/transparent area.**
 - Keep all files in one folder.

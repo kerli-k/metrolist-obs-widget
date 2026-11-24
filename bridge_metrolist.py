@@ -4,7 +4,14 @@
 Polls the Metrolist desktop player through playerctl and exposes the same
 loopback HTTP API and file fallback as bridge_metrolist.ps1.
 
-Requires: python3 and playerctl (sudo apt install playerctl).
+Metrolist 14.x registers as org.mpris.MediaPlayer2.metrolist, which playerctl
+lists as "metrolist".
+
+Requires: python3 and playerctl:
+  Arch / CachyOS:  sudo pacman -S playerctl
+  Debian / Ubuntu: sudo apt install playerctl
+  Fedora:          sudo dnf install playerctl
+  openSUSE:        sudo zypper install playerctl
 """
 
 import argparse
@@ -53,8 +60,14 @@ def playerctl(*args, timeout=3):
 
 def find_player():
     result = playerctl("-l")
-    for name in result.stdout.splitlines():
-        name = name.strip()
+    names = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+    # playerctl usually lists the short bus name ("metrolist"), but some
+    # builds show the full org.mpris.MediaPlayer2.* name.
+    for name in names:
+        if name.lower() in ("metrolist", "org.mpris.mediaplayer2.metrolist"):
+            return name
+    for name in names:
         if "metrolist" in name.lower():
             return name
     return None
@@ -238,6 +251,8 @@ def poll_loop():
         try:
             if not player:
                 player = find_player()
+                if player:
+                    print(f"MPRIS player: {player}", flush=True)
 
             if not player:
                 last_key = None
@@ -320,7 +335,11 @@ def main():
         return 1
 
     if not shutil.which("playerctl"):
-        print("playerctl is required. Install it with: sudo apt install playerctl", flush=True)
+        print("playerctl is required to read Metrolist's MPRIS session.", flush=True)
+        print("  Arch / CachyOS:  sudo pacman -S playerctl", flush=True)
+        print("  Debian / Ubuntu: sudo apt install playerctl", flush=True)
+        print("  Fedora:          sudo dnf install playerctl", flush=True)
+        print("  openSUSE:        sudo zypper install playerctl", flush=True)
         return 1
 
     index_path = HERE / "index.html"
